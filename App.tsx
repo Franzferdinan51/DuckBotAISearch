@@ -10,14 +10,19 @@ import LiveWatcher from './components/LiveWatcher';
 import CodingInterface from './components/CodingInterface';
 import SearchInterface from './components/SearchInterface';
 
+const getInitialSystemMessage = (mode: SessionMode): Message => ({
+  id: `init-${mode.toLowerCase()}-1`,
+  author: mode === SessionMode.SEARCH ? 'Search Dispatcher' : 'Council Clerk',
+  authorType: AuthorType.SYSTEM,
+  content:
+    mode === SessionMode.SEARCH
+      ? 'Search swarm standing by. Pick a backend, choose your synthesis provider, and start researching.'
+      : 'All rise. The High AI Council is now in session. Select a mode below to begin.',
+});
+
 const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
-      {
-          id: 'init-1',
-          author: 'Council Clerk',
-          authorType: AuthorType.SYSTEM,
-          content: "All rise. The High AI Council is now in session. Select a mode below to begin."
-      }
+      getInitialSystemMessage(SessionMode.SEARCH)
   ]);
   
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -28,7 +33,7 @@ const App: React.FC = () => {
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>(SessionStatus.IDLE);
   const [activeSessionBots, setActiveSessionBots] = useState<BotConfig[]>([]);
-  const [sessionMode, setSessionMode] = useState<SessionMode>(SessionMode.PROPOSAL);
+  const [sessionMode, setSessionMode] = useState<SessionMode>(SessionMode.SEARCH);
   const [debateHeat, setDebateHeat] = useState<number>(0); 
   
   const [showCostWarning, setShowCostWarning] = useState(false);
@@ -668,7 +673,7 @@ const App: React.FC = () => {
 
   const clearSession = () => {
       controlSignal.current.stop = true;
-      setMessages([{ id: `init-${Date.now()}`, author: 'Clerk', authorType: AuthorType.SYSTEM, content: "Council Reset." }]);
+      setMessages([getInitialSystemMessage(sessionMode)]);
       setSessionStatus(SessionStatus.IDLE);
       setCurrentTopic(null);
       setSessionStartedAt(null);
@@ -712,36 +717,37 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen w-full bg-[#0a0c10] text-slate-200 font-sans overflow-y-auto bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-slate-900/50 via-slate-950/80 to-[#050608]">
       
-      {/* Quick Settings Bar */}
-      <div className="flex items-center gap-4 px-4 py-2 bg-slate-900/80 border-b border-slate-800 text-xs">
-        <div className="flex items-center gap-2">
-          <span className="text-slate-400">Temp:</span>
-          <input
-            type="range"
-            min="0.0"
-            max="1.0"
-            step="0.1"
-            value={settings.audio.temperature || 0.7}
-            onChange={e => setSettings(prev => ({ ...prev, audio: { ...prev.audio, temperature: parseFloat(e.target.value) } }))}
-            className="w-16 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-          />
-          <span className="text-amber-400 font-mono w-6">{settings.audio.temperature?.toFixed(1) || '0.7'}</span>
+      {!showSearchUI && (
+        <div className="flex items-center gap-4 px-4 py-2 bg-slate-900/80 border-b border-slate-800 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400">Temp:</span>
+            <input
+              type="range"
+              min="0.0"
+              max="1.0"
+              step="0.1"
+              value={settings.audio.temperature || 0.7}
+              onChange={e => setSettings(prev => ({ ...prev, audio: { ...prev.audio, temperature: parseFloat(e.target.value) } }))}
+              className="w-16 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+            />
+            <span className="text-amber-400 font-mono w-6">{settings.audio.temperature?.toFixed(1) || '0.7'}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="quick-stream-toggle"
+              checked={settings.audio.enabled}
+              onChange={e => setSettings(prev => ({ ...prev, audio: { ...prev.audio, enabled: e.target.checked } }))}
+              className="w-4 h-4 accent-amber-500 cursor-pointer"
+            />
+            <label htmlFor="quick-stream-toggle" className="text-slate-300 cursor-pointer">Stream</label>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <span className="text-slate-500">Council:</span>
+            <span className="text-emerald-400 font-bold">{settings.bots.filter(b => b.enabled).length} active</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            id="quick-stream-toggle"
-            checked={settings.audio.enabled}
-            onChange={e => setSettings(prev => ({ ...prev, audio: { ...prev.audio, enabled: e.target.checked } }))}
-            className="w-4 h-4 accent-amber-500 cursor-pointer"
-          />
-          <label htmlFor="quick-stream-toggle" className="text-slate-300 cursor-pointer">Stream</label>
-        </div>
-        <div className="flex items-center gap-2 ml-auto">
-          <span className="text-slate-500">Council:</span>
-          <span className="text-emerald-400 font-bold">{settings.bots.filter(b => b.enabled).length} active</span>
-        </div>
-      </div>
+      )}
       
       {showSearchUI ? (
           <div className="flex-1 min-h-0 relative flex flex-col">
