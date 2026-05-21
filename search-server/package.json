@@ -1,0 +1,22 @@
+{
+  "name": "duckbotsearch-search-server",
+  "version": "1.0.0",
+  "description": "DuckBotSearch API server for SearXNG integration",
+  "type": "module",
+  "main": "server.ts",
+  "scripts": {
+    "dev": "tsx watch server.ts",
+    "start": "tsx server.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}
