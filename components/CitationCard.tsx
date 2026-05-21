@@ -1,93 +1,50 @@
-/**
- * Citation Card Component
- * Displays a single citation with source information
- */
-
-import React, { useState } from 'react';
+import React from 'react';
 import { Citation } from '../search-service/SearchResult';
 
 interface CitationCardProps {
   citation: Citation;
 }
 
+const getDomain = (url: string): string => {
+  try {
+    return new URL(url).hostname.replace('www.', '');
+  } catch {
+    return url;
+  }
+};
+
 const CitationCard: React.FC<CitationCardProps> = ({ citation }) => {
-  const [isHovered, setIsHovered] = useState(false);
-
-  const handleClick = () => {
-    window.open(citation.url, '_blank', 'noopener,noreferrer');
-  };
-
-  const getDomain = (url: string): string => {
-    try {
-      return new URL(url).hostname.replace('www.', '');
-    } catch {
-      return url;
-    }
-  };
-
   return (
-    <div
-      className="group relative p-4 border border-gray-100 dark:border-gray-700 rounded-xl hover:border-blue-200 dark:hover:border-blue-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all cursor-pointer"
-      onClick={handleClick}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+    <button
+      type="button"
+      onClick={() => window.open(citation.url, '_blank', 'noopener,noreferrer')}
+      className="group block w-full rounded-[24px] border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-emerald-400 hover:bg-emerald-50"
     >
-      <div className="flex items-start gap-3">
-        {/* Citation Number */}
-        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
-          <span className="text-blue-700 dark:text-blue-300 font-semibold text-sm">
-            [{citation.id}]
-          </span>
+      <div className="flex items-start gap-4">
+        <div className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-sm font-semibold text-white">
+          [{citation.id}]
         </div>
 
-        {/* Citation Content */}
-        <div className="flex-1 min-w-0">
-          <h4 className="font-medium text-gray-900 dark:text-white truncate mb-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-slate-500">
+            <span>{getDomain(citation.url)}</span>
+            <span>{citation.engine}</span>
+            <span>{Math.round(citation.relevanceScore * 100)} relevance</span>
+            {citation.publishedDate && <span>{citation.publishedDate}</span>}
+          </div>
+
+          <h4 className="mt-2 text-sm font-semibold leading-6 text-slate-900 transition group-hover:text-emerald-800">
             {citation.title}
           </h4>
-          <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-            {/* Favicon */}
-            <img
-              src={`https://www.google.com/s2/favicons?domain=${getDomain(citation.url)}&sz=16`}
-              alt=""
-              className="w-4 h-4"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-            />
-            <span className="truncate">{getDomain(citation.url)}</span>
-            <span className="text-gray-300 dark:text-gray-600">•</span>
-            <span className="capitalize">{citation.engine}</span>
-          </div>
-        </div>
 
-        {/* Relevance Badge */}
-        <div className="flex-shrink-0">
-          <div
-            className={`px-2 py-1 rounded-full text-xs font-medium ${
-              citation.relevanceScore > 0.7
-                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                : citation.relevanceScore > 0.4
-                ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
-            }`}
-          >
-            {Math.round(citation.relevanceScore * 100)}%
-          </div>
+          {citation.snippet && (
+            <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">
+              {citation.snippet}
+            </p>
+          )}
         </div>
       </div>
-
-      {/* Snippet Preview on Hover */}
-      {isHovered && citation.snippet && (
-        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-          <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-            {citation.snippet.slice(0, 200)}
-            {citation.snippet.length > 200 ? '...' : ''}
-          </p>
-        </div>
-      )}
-
-      {/* Hover Indicator */}
-      <div className="absolute inset-0 border-2 border-transparent group-hover:border-blue-200 dark:group-hover:border-blue-800 rounded-xl transition-colors pointer-events-none" />
-    </div>
+    </button>
   );
 };
 
