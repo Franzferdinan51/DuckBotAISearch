@@ -10,6 +10,10 @@
     "mcp": "node mcp-server.mjs",
     "search:dev": "tsx search-server/server.ts",
     "search:start": "tsx search-server/server.ts",
+    "searxng:up": "docker compose -f ./searxng/docker-compose.yml up -d",
+    "searxng:down": "docker compose -f ./searxng/docker-compose.yml down",
+    "stack:start": "powershell -ExecutionPolicy Bypass -File ./start-search-stack.ps1",
+    "stack:stop": "powershell -ExecutionPolicy Bypass -File ./stop-search-stack.ps1",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -3,8 +3,8 @@
  * Handles communication with SearXNG metasearch engine
  */
 
-import { SearchResult, SearchQuery, Citation } from './SearchResult';
-import { SEARCH_CONFIG } from './searchConfig';
+import { SearchResult } from './SearchResult';
+import { SEARCH_CONFIG, SEARCH_ENGINE_NAMES } from './searchConfig';
 
 interface SearXNGResult {
   title: string;
@@ -28,7 +28,7 @@ export class SearXNGClient {
   private secretKey: string;
 
   constructor(baseUrl?: string, secretKey?: string) {
-    this.baseUrl = baseUrl || SEARCH_CONFIG.SEARXNG_URL;
+    this.baseUrl = (baseUrl || SEARCH_CONFIG.SEARXNG_URL).replace(/\/+$/, '');
     this.secretKey = secretKey || '';
   }
 
@@ -150,11 +150,21 @@ export class SearXNGClient {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl}/health`, {
+      const params = new URLSearchParams({
+        q: 'health check',
+        format: 'json',
+        engines: 'duckduckgo,wikipedia',
+      });
+      const response = await fetch(`${this.baseUrl}/search?${params.toString()}`, {
         method: 'GET',
         signal: AbortSignal.timeout(5000),
       });
-      return response.ok;
+      if (!response.ok) {
+        return false;
+      }
+
+      const data = (await response.json()) as Partial<SearXNGResponse>;
+      return Array.isArray(data.results);
     } catch {
       return false;
     }
@@ -165,18 +175,23 @@ export class SearXNGClient {
    */
   async getEngines(): Promise<string[]> {
     try {
-      const response = await fetch(`${this.baseUrl}/engines`, {
+      const response = await fetch(`${this.baseUrl}/preferences`, {
         method: 'GET',
         signal: AbortSignal.timeout(5000),
       });
 
       if (response.ok) {
-        const data = await response.json();
-        return data.engines || [];
+        const html = await response.text();
+        const matches = [...html.matchAll(/name="engines"[^>]*value="([^"]+)"/g)];
+        const engines = [...new Set(matches.map((match) => match[1]).filter(Boolean))];
+
+        if (engines.length > 0) {
+          return engines;
+        }
       }
-      return [];
+      return SEARCH_ENGINE_NAMES;
     } catch {
-      return [];
+      return SEARCH_ENGINE_NAMES;
     }
   }
 }

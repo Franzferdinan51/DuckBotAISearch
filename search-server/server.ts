@@ -8,7 +8,7 @@ import cors from 'cors';
 import { searchService } from '../search-service/searchService';
 
 const app = express();
-const PORT = process.env.PORT || 3005;
+const PORT = process.env.SEARCH_SERVER_PORT || process.env.PORT || 3005;
 
 // Middleware
 app.use(cors());
@@ -27,13 +27,30 @@ app.get('/health', async (req, res) => {
 // Main search endpoint
 app.post('/api/search', async (req, res) => {
   try {
-    const { query, engines } = req.body;
+    const {
+      query,
+      engines,
+      provider,
+      apiKey,
+      synthesisProvider,
+      lmStudioEndpoint,
+      lmStudioApiKey,
+      lmStudioModel,
+    } = req.body;
 
     if (!query || typeof query !== 'string') {
       return res.status(400).json({ error: 'Query is required' });
     }
 
-    const response = await searchService.search(query, engines);
+    const response = await searchService.search(query, {
+      provider,
+      engines,
+      apiKey,
+      synthesisProvider,
+      lmStudioEndpoint,
+      lmStudioApiKey,
+      lmStudioModel,
+    });
 
     res.json(response);
   } catch (error: any) {
@@ -44,7 +61,7 @@ app.post('/api/search', async (req, res) => {
 
 // Streaming search endpoint (SSE)
 app.get('/api/search/stream', async (req, res) => {
-  const { q, engines } = req.query;
+  const { q, engines, provider, apiKey, synthesisProvider, lmStudioEndpoint, lmStudioApiKey, lmStudioModel } = req.query;
 
   if (!q || typeof q !== 'string') {
     return res.status(400).json({ error: 'Query is required' });
@@ -66,7 +83,15 @@ app.get('/api/search/stream', async (req, res) => {
       ? engines.split(',').map((value) => value.trim()).filter(Boolean)
       : undefined;
 
-  const streamGenerator = searchService.streamSearch(q, parsedEngines);
+  const streamGenerator = searchService.streamSearch(q, {
+    provider: typeof provider === 'string' ? provider as any : undefined,
+    engines: parsedEngines,
+    apiKey: typeof apiKey === 'string' ? apiKey : undefined,
+    synthesisProvider: typeof synthesisProvider === 'string' ? synthesisProvider as any : undefined,
+    lmStudioEndpoint: typeof lmStudioEndpoint === 'string' ? lmStudioEndpoint : undefined,
+    lmStudioApiKey: typeof lmStudioApiKey === 'string' ? lmStudioApiKey : undefined,
+    lmStudioModel: typeof lmStudioModel === 'string' ? lmStudioModel : undefined,
+  });
 
   const sendEvent = (type: string, data: any) => {
     res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);

@@ -531,12 +531,28 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSettingsChang
                             <input type="text" value={settings.providers.lmStudioEndpoint} onChange={e => updateProvider('lmStudioEndpoint', e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-xs" />
                         </div>
                         <div>
+                            <label className="text-xs text-slate-400">LM Studio API Key</label>
+                            <input type="password" value={settings.providers.lmStudioApiKey || ''} onChange={e => updateProvider('lmStudioApiKey', e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-xs" placeholder="optional" />
+                        </div>
+                        <div>
                             <label className="text-xs text-slate-400">Ollama Endpoint</label>
                             <input type="text" value={settings.providers.ollamaEndpoint} onChange={e => updateProvider('ollamaEndpoint', e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-xs" />
                         </div>
                         <div>
                             <label className="text-xs text-slate-400">Jan AI Endpoint</label>
                             <input type="text" value={settings.providers.janAiEndpoint} onChange={e => updateProvider('janAiEndpoint', e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-xs" />
+                        </div>
+                    </div>
+
+                    <div className="p-4 bg-slate-800 rounded border border-slate-700 space-y-3">
+                        <h4 className="text-sm font-bold text-cyan-400 block">Search Backends</h4>
+                        <div>
+                            <label className="text-xs text-slate-400">Brave Search API Key</label>
+                            <input type="password" value={settings.providers.braveSearchApiKey || ''} onChange={e => updateProvider('braveSearchApiKey', e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-xs" placeholder="BSA..." />
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-400">Tavily API Key</label>
+                            <input type="password" value={settings.providers.tavilyApiKey || ''} onChange={e => updateProvider('tavilyApiKey', e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-xs" placeholder="tvly-..." />
                         </div>
                     </div>
                 </div>

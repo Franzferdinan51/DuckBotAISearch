@@ -1,0 +1,15 @@
+services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: duckbot-searxng
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./config:/etc/searxng
+      - ./data:/var/cache/searxng
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8888/
+      UWSGI_WORKERS: 2
+      UWSGI_THREADS: 2
+      FORCE_OWNERSHIP: "false"
+    restart: unless-stopped

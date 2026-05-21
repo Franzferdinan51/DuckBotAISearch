@@ -89,6 +89,7 @@ export interface ProviderSettings {
     openRouterKey?: string;
     ollamaEndpoint: string;
     lmStudioEndpoint: string;
+    lmStudioApiKey?: string;
     janAiEndpoint: string;
     genericOpenAIEndpoint?: string; 
     genericOpenAIKey?: string;
@@ -100,6 +101,8 @@ export interface ProviderSettings {
     moonshotEndpoint?: string;
     minimaxApiKey?: string;
     minimaxEndpoint?: string;
+    braveSearchApiKey?: string;
+    tavilyApiKey?: string;
 }
 
 // --- GLOBAL MEMORY (Laws/Precedents) ---
@@ -248,6 +251,8 @@ export interface SearchAgentTrace {
   summary: string;
 }
 
+export type SearchProvider = 'searxng' | 'brave' | 'tavily';
+
 export interface SearchProfile {
   intent: 'general' | 'news' | 'technical' | 'academic' | 'comparison' | 'local';
   reasoning: string;
@@ -258,6 +263,7 @@ export interface SearchProfile {
 
 export interface SearchResponse {
   query: string;
+  provider: SearchProvider;
   answer: string;
   citations: Citation[];
   sources: SearchResult[];

@@ -876,6 +876,7 @@ export const DEFAULT_SETTINGS: Settings = {
         openRouterKey: "",
         ollamaEndpoint: "http://localhost:11434/v1/chat/completions",
         lmStudioEndpoint: "http://100.74.88.40:1234/v1/chat/completions",
+        lmStudioApiKey: "",
         janAiEndpoint: "http://localhost:1337/v1/chat/completions",
         genericOpenAIEndpoint: "",
         genericOpenAIKey: "",
@@ -886,7 +887,9 @@ export const DEFAULT_SETTINGS: Settings = {
         moonshotApiKey: "",
         moonshotEndpoint: "https://api.moonshot.cn/v1/chat/completions",
         minimaxApiKey: "",
-        minimaxEndpoint: "https://api.minimax.chat/v1/text/chatcompletion_v2"
+        minimaxEndpoint: "https://api.minimax.chat/v1/text/chatcompletion_v2",
+        braveSearchApiKey: "",
+        tavilyApiKey: ""
     },
     audio: {
         enabled: false,

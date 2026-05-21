@@ -1,29 +1,30 @@
 /**
  * Search Orchestrator for DuckBotSearch
- * Coordinates a multi-stage "agent swarm" over SearXNG search results.
+ * Coordinates a multi-stage "agent swarm" over multiple search backends.
  */
 
-import { searxngClient } from './searxngClient';
 import {
   Citation,
   SearchAgentTrace,
   SearchProfile,
+  SearchProvider,
   SearchResponse,
   SearchResult,
   SearchStreamEvent,
 } from './SearchResult';
 import { SEARCH_SWARM_AGENTS } from './searchAgents';
 import { SEARCH_CONFIG } from './searchConfig';
+import { synthesizeWithLmStudio } from './lmStudioSynthesis';
+import { executeSearch } from './searchProviders';
 
-export interface OrchestrationResult {
-  answer: string;
-  citations: Citation[];
-  sources: SearchResult[];
-  relatedQuestions: string[];
-  agentsUsed: string[];
-  processingTime: number;
-  agentTrace: SearchAgentTrace[];
-  profile: SearchProfile;
+export interface SearchExecutionRequest {
+  provider?: SearchProvider;
+  engines?: string[];
+  apiKey?: string;
+  synthesisProvider?: 'heuristic' | 'lmstudio';
+  lmStudioEndpoint?: string;
+  lmStudioApiKey?: string;
+  lmStudioModel?: string;
 }
 
 type RankedResult = SearchResult & {
@@ -44,42 +45,38 @@ const AGENT_SEQUENCE = [
 ] as const;
 
 export class SearchOrchestrator {
-  /**
-   * Run a complete search with deterministic swarm processing.
-   */
-  async search(query: string, engines?: string[]): Promise<SearchResponse> {
+  async search(query: string, request: SearchExecutionRequest = {}): Promise<SearchResponse> {
     const startedAt = Date.now();
-    const profile = this.analyzeQuery(query, engines);
+    const provider = request.provider ?? 'searxng';
+    const profile = this.analyzeQuery(query, request.engines, provider);
     const agentTrace: SearchAgentTrace[] = [];
 
     agentTrace.push(
       this.buildTrace(
         'search-analyst',
-        `Intent classified as ${profile.intent}; using ${profile.recommendedEngines.join(', ')}.`
+        `Intent classified as ${profile.intent}; provider ${this.providerLabel(provider)}; engines ${profile.recommendedEngines.join(', ')}.`
       )
     );
 
-    const rawResults = await searxngClient.search(
+    const rawResults = await executeSearch({
+      provider,
       query,
-      profile.recommendedEngines,
-      SEARCH_CONFIG.MAX_RESULTS
-    );
+      engines: profile.recommendedEngines,
+      apiKey: request.apiKey,
+      maxResults: SEARCH_CONFIG.MAX_RESULTS,
+      intent: profile.intent,
+    });
 
     const rankedResults = this.rankResults(query, rawResults, profile);
     agentTrace.push(
       this.buildTrace(
         'result-processor',
-        `Ranked ${rankedResults.length} sources after deduplication and cross-engine scoring.`
+        `Ranked ${rankedResults.length} sources after deduplication and cross-provider scoring.`
       )
     );
 
     const factCheck = this.crossCheckResults(query, rankedResults, profile);
-    agentTrace.push(
-      this.buildTrace(
-        'fact-checker',
-        factCheck.summary
-      )
-    );
+    agentTrace.push(this.buildTrace('fact-checker', factCheck.summary));
 
     const citations = this.formatCitations(rankedResults);
     agentTrace.push(
@@ -89,17 +86,18 @@ export class SearchOrchestrator {
       )
     );
 
-    const answer = this.generateAnswer(query, rankedResults, citations, factCheck, profile);
+    const answer = await this.generateAnswer(query, rankedResults, citations, factCheck, profile, provider, request);
     const relatedQuestions = this.generateRelatedQuestions(query, rankedResults, profile);
     agentTrace.push(
       this.buildTrace(
         'answer-architect',
-        `Synthesized a cited ${profile.intent} answer with ${relatedQuestions.length} follow-up questions.`
+        `${request.synthesisProvider === 'lmstudio' ? 'LM Studio' : 'Heuristic'} synthesis completed with ${relatedQuestions.length} follow-up questions.`
       )
     );
 
     return {
       query,
+      provider,
       answer,
       citations,
       sources: rankedResults,
@@ -112,115 +110,26 @@ export class SearchOrchestrator {
     };
   }
 
-  /**
-   * Stream search results and swarm progress over SSE-friendly events.
-   */
-  async *streamSearch(query: string, engines?: string[]): AsyncGenerator<SearchStreamEvent> {
-    const profile = this.analyzeQuery(query, engines);
+  async *streamSearch(query: string, request: SearchExecutionRequest = {}): AsyncGenerator<SearchStreamEvent> {
+    const response = await this.search(query, request);
 
-    yield {
-      type: 'status',
-      data: `Query analysis complete. Intent: ${profile.intent}.`,
-      agentId: 'search-analyst',
-    };
-    yield { type: 'profile', data: profile, agentId: 'search-analyst' };
-    yield {
-      type: 'agent',
-      data: this.buildTrace(
-        'search-analyst',
-        `Selected ${profile.recommendedEngines.join(', ')} for ${profile.intent} search.`
-      ),
-      agentId: 'search-analyst',
-    };
-
-    const rawResults = await searxngClient.search(
-      query,
-      profile.recommendedEngines,
-      SEARCH_CONFIG.MAX_RESULTS
-    );
-
-    yield {
-      type: 'status',
-      data: `SearXNG returned ${rawResults.length} results. Ranking sources now...`,
-      agentId: 'result-processor',
-    };
-
-    const rankedResults = this.rankResults(query, rawResults, profile);
-    for (const result of rankedResults.slice(0, 10)) {
-      yield { type: 'source', data: result, agentId: 'result-processor' };
+    yield { type: 'profile', data: response.profile, agentId: 'search-analyst' };
+    for (const trace of response.agentTrace) {
+      yield { type: 'agent', data: trace, agentId: trace.agentId };
     }
-
-    const factCheck = this.crossCheckResults(query, rankedResults, profile);
-    yield {
-      type: 'agent',
-      data: this.buildTrace('fact-checker', factCheck.summary),
-      agentId: 'fact-checker',
-    };
-    yield {
-      type: 'status',
-      data: 'Cross-source corroboration complete. Formatting citations...',
-      agentId: 'fact-checker',
-    };
-
-    const citations = this.formatCitations(rankedResults);
-    for (const citation of citations.slice(0, 6)) {
+    for (const source of response.sources.slice(0, 10)) {
+      yield { type: 'source', data: source, agentId: 'result-processor' };
+    }
+    for (const citation of response.citations) {
       yield { type: 'citation', data: citation, agentId: 'citation-formatter' };
     }
-
-    yield {
-      type: 'agent',
-      data: this.buildTrace(
-        'citation-formatter',
-        `Built ${citations.length} citations from the strongest sources.`
-      ),
-      agentId: 'citation-formatter',
-    };
-    yield {
-      type: 'status',
-      data: 'Synthesizing final answer...',
-      agentId: 'answer-architect',
-    };
-
-    const answer = this.generateAnswer(query, rankedResults, citations, factCheck, profile);
-    for (const token of this.tokenize(answer)) {
+    for (const token of this.tokenize(response.answer)) {
       yield { type: 'token', data: token, agentId: 'answer-architect' };
     }
-
-    const response: SearchResponse = {
-      query,
-      answer,
-      citations,
-      sources: rankedResults,
-      relatedQuestions: this.generateRelatedQuestions(query, rankedResults, profile),
-      totalResults: rankedResults.length,
-      searchTime: 0,
-      agentsUsed: [...AGENT_SEQUENCE],
-      agentTrace: [
-        this.buildTrace(
-          'search-analyst',
-          `Selected ${profile.recommendedEngines.join(', ')} for ${profile.intent} search.`
-        ),
-        this.buildTrace(
-          'result-processor',
-          `Ranked ${rankedResults.length} sources after deduplication and cross-engine scoring.`
-        ),
-        this.buildTrace('fact-checker', factCheck.summary),
-        this.buildTrace(
-          'citation-formatter',
-          `Built ${citations.length} citations from the strongest sources.`
-        ),
-        this.buildTrace(
-          'answer-architect',
-          'Generated the final cited answer and follow-up questions.'
-        ),
-      ],
-      profile,
-    };
-
     yield { type: 'complete', data: response, agentId: 'answer-architect' };
   }
 
-  private analyzeQuery(query: string, selectedEngines?: string[]): SearchProfile {
+  private analyzeQuery(query: string, selectedEngines: string[] | undefined, provider: SearchProvider): SearchProfile {
     const normalized = query.toLowerCase();
     const explicitEngines = selectedEngines?.filter(Boolean) ?? [];
 
@@ -243,18 +152,22 @@ export class SearchOrchestrator {
 
     const recommendedEngines = explicitEngines.length > 0
       ? explicitEngines
-      : this.defaultEnginesForIntent(intent);
+      : this.defaultEnginesForIntent(intent, provider);
 
     return {
       intent,
-      reasoning: this.intentReasoning(intent, query),
+      reasoning: this.intentReasoning(intent, query, provider),
       recommendedEngines,
       safeSearch: true,
       freshness,
     };
   }
 
-  private defaultEnginesForIntent(intent: SearchProfile['intent']): string[] {
+  private defaultEnginesForIntent(intent: SearchProfile['intent'], provider: SearchProvider): string[] {
+    if (provider !== 'searxng') {
+      return [provider];
+    }
+
     switch (intent) {
       case 'news':
         return ['google', 'bing', 'duckduckgo'];
@@ -271,20 +184,21 @@ export class SearchOrchestrator {
     }
   }
 
-  private intentReasoning(intent: SearchProfile['intent'], query: string): string {
+  private intentReasoning(intent: SearchProfile['intent'], query: string, provider: SearchProvider): string {
+    const providerText = this.providerLabel(provider);
     switch (intent) {
       case 'news':
-        return `The query "${query}" includes freshness cues, so the swarm prioritizes broad web engines for current reporting.`;
+        return `The query "${query}" includes freshness cues, so the swarm prioritizes recent coverage from ${providerText}.`;
       case 'technical':
-        return `The query "${query}" looks implementation-focused, so the swarm favors engines that surface docs and developer references.`;
+        return `The query "${query}" looks implementation-focused, so the swarm favors documentation-heavy sources from ${providerText}.`;
       case 'academic':
-        return `The query "${query}" appears research-oriented, so the swarm emphasizes sources that usually expose reference material and summaries.`;
+        return `The query "${query}" appears research-oriented, so the swarm emphasizes citation-friendly sources surfaced by ${providerText}.`;
       case 'comparison':
-        return `The query "${query}" asks for tradeoffs, so the swarm aims for source diversity rather than a single authoritative page.`;
+        return `The query "${query}" asks for tradeoffs, so the swarm aims for source diversity in ${providerText} results.`;
       case 'local':
-        return `The query "${query}" appears location-sensitive, so the swarm narrows to engines that typically rank locally relevant pages well.`;
+        return `The query "${query}" appears location-sensitive, so the swarm narrows to sources that usually rank local pages well in ${providerText}.`;
       default:
-        return `The query "${query}" is treated as a general search and balanced across major engines.`;
+        return `The query "${query}" is treated as a general search and balanced within ${providerText}.`;
     }
   }
 
@@ -393,15 +307,33 @@ export class SearchOrchestrator {
     }));
   }
 
-  private generateAnswer(
+  private async generateAnswer(
     query: string,
     results: RankedResult[],
     citations: Citation[],
     factCheck: { verified: boolean; confidence: number; warnings: string[] },
-    profile: SearchProfile
-  ): string {
+    profile: SearchProfile,
+    provider: SearchProvider,
+    request: SearchExecutionRequest
+  ): Promise<string> {
     if (results.length === 0) {
-      return `I couldn't find enough usable results for "${query}". Check that SearXNG is running and try a narrower query.`;
+      return `I couldn't find enough usable results for "${query}". Check the selected search provider and try a narrower query.`;
+    }
+
+    if (request.synthesisProvider === 'lmstudio') {
+      try {
+        return await synthesizeWithLmStudio({
+          endpoint: request.lmStudioEndpoint || '',
+          apiKey: request.lmStudioApiKey,
+          model: request.lmStudioModel || 'local-model',
+          query,
+          profile,
+          results,
+          citations,
+        });
+      } catch (error) {
+        console.warn('LM Studio synthesis failed, falling back to heuristic answer.', error);
+      }
     }
 
     const top = results.slice(0, 3);
@@ -423,11 +355,9 @@ export class SearchOrchestrator {
       '',
       ...bullets,
       '',
-      `The strongest sources came from ${sourceMix}. The swarm prioritized ${profile.recommendedEngines.join(', ')} via SearXNG, then ranked the results for relevance, diversity, and corroboration.`,
+      `The strongest sources came from ${sourceMix}. The swarm searched via ${this.providerLabel(provider)} and then ranked the results for relevance, diversity, and corroboration.`,
       warningText,
-    ]
-      .filter(Boolean)
-      .join('\n');
+    ].filter(Boolean).join('\n');
   }
 
   private profileOpening(intent: SearchProfile['intent'], query: string, confidence: number): string {
@@ -447,11 +377,7 @@ export class SearchOrchestrator {
     }
   }
 
-  private generateRelatedQuestions(
-    query: string,
-    results: RankedResult[],
-    profile: SearchProfile
-  ): string[] {
+  private generateRelatedQuestions(query: string, results: RankedResult[], profile: SearchProfile): string[] {
     const leadingTerms = this.extractTerms(query).slice(0, 2);
     const topDomain = results[0]?.domain;
 
@@ -484,6 +410,17 @@ export class SearchOrchestrator {
       role: agent?.role ?? 'Search agent',
       summary,
     };
+  }
+
+  private providerLabel(provider: SearchProvider): string {
+    switch (provider) {
+      case 'brave':
+        return 'Brave Search';
+      case 'tavily':
+        return 'Tavily';
+      default:
+        return 'SearXNG';
+    }
   }
 
   private tokenize(text: string): string[] {

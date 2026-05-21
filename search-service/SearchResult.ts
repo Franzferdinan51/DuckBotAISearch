@@ -32,6 +32,8 @@ export interface SearchAgentTrace {
   summary: string;
 }
 
+export type SearchProvider = 'searxng' | 'brave' | 'tavily';
+
 export interface SearchProfile {
   intent: 'general' | 'news' | 'technical' | 'academic' | 'comparison' | 'local';
   reasoning: string;
@@ -46,10 +48,12 @@ export interface SearchQuery {
   count: number;
   safeSearch: boolean;
   timeRange?: 'day' | 'week' | 'month' | 'year';
+  provider?: SearchProvider;
 }
 
 export interface SearchResponse {
   query: string;
+  provider: SearchProvider;
   answer: string;
   citations: Citation[];
   sources: SearchResult[];

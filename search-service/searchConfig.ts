@@ -35,6 +35,8 @@ export const SEARCH_ENGINES = {
   qwant: { name: 'Qwant', weight: 0.72, enabled: true },
 };
 
+export const SEARCH_ENGINE_NAMES = Object.keys(SEARCH_ENGINES);
+
 // Agent roles for search processing
 export const SEARCH_AGENTS = {
   QUERY_ANALYZER: 'search-analyst',

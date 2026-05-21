@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Settings } from '../types';
 import {
   Citation,
   SearchAgentTrace,
   SearchProfile,
+  SearchProvider,
   SearchResponse,
   SearchResult,
 } from '../search-service/SearchResult';
@@ -10,6 +12,8 @@ import SearchResults from './SearchResults';
 
 interface SearchInterfaceProps {
   onModeChange?: (mode: 'search' | 'council') => void;
+  settings: Settings;
+  onSettingsChange: (settings: Settings) => void;
 }
 
 type SearchState = {
@@ -19,6 +23,7 @@ type SearchState = {
   relatedQuestions: string[];
   agentTrace: SearchAgentTrace[];
   profile: SearchProfile | null;
+  provider: SearchProvider;
   status: string;
 };
 
@@ -29,10 +34,11 @@ const DEFAULT_STATE: SearchState = {
   relatedQuestions: [],
   agentTrace: [],
   profile: null,
+  provider: 'searxng',
   status: 'Ready',
 };
 
-const SearchInterface: React.FC<SearchInterfaceProps> = ({ onModeChange }) => {
+const SearchInterface: React.FC<SearchInterfaceProps> = ({ onModeChange, settings, onSettingsChange }) => {
   const [query, setQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [results, setResults] = useState<SearchState | null>(null);
@@ -40,7 +46,9 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onModeChange }) => {
   const [availableEngines, setAvailableEngines] = useState<string[]>([]);
   const [selectedEngines, setSelectedEngines] = useState<string[]>(['google', 'bing', 'duckduckgo']);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'healthy' | 'degraded'>('checking');
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const [searchProvider, setSearchProvider] = useState<SearchProvider>('searxng');
+  const [synthesisProvider, setSynthesisProvider] = useState<'heuristic' | 'lmstudio'>('heuristic');
+  const [lmStudioModel, setLmStudioModel] = useState('local-model');
 
   useEffect(() => {
     const loadMetadata = async () => {
@@ -73,10 +81,17 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onModeChange }) => {
     };
 
     loadMetadata();
-    return () => {
-      eventSourceRef.current?.close();
-    };
   }, []);
+
+  const updateProviderSetting = (field: keyof Settings['providers'], value: string) => {
+    onSettingsChange({
+      ...settings,
+      providers: {
+        ...settings.providers,
+        [field]: value,
+      },
+    });
+  };
 
   const toggleEngine = (engine: string) => {
     setSelectedEngines((current) => {
@@ -87,143 +102,80 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onModeChange }) => {
     });
   };
 
-  const finalizeFromResponse = (response: SearchResponse) => {
-    setResults({
-      answer: response.answer,
-      citations: response.citations,
-      sources: response.sources,
-      relatedQuestions: response.relatedQuestions,
-      agentTrace: response.agentTrace,
-      profile: response.profile,
-      status: 'Complete',
-    });
-  };
+  const currentSearchApiKey =
+    searchProvider === 'brave'
+      ? settings.providers.braveSearchApiKey || ''
+      : searchProvider === 'tavily'
+        ? settings.providers.tavilyApiKey || ''
+        : '';
 
-  const handleSearch = (searchQuery: string) => {
+  const handleSearch = async (searchQuery: string) => {
     const trimmedQuery = searchQuery.trim();
     if (!trimmedQuery) {
       return;
     }
 
-    eventSourceRef.current?.close();
     setIsSearching(true);
     setError(null);
     setResults({
       ...DEFAULT_STATE,
-      status: 'Analyzing query...',
+      provider: searchProvider,
+      status: 'Dispatching search swarm...',
     });
 
-    const params = new URLSearchParams({
-      q: trimmedQuery,
-      engines: selectedEngines.join(','),
-    });
-
-    const source = new EventSource(`/search-api/api/search/stream?${params.toString()}`);
-    eventSourceRef.current = source;
-
-    source.addEventListener('status', (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as string;
-      setResults((current) => ({
-        ...(current ?? DEFAULT_STATE),
-        status: payload,
-      }));
-    });
-
-    source.addEventListener('profile', (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as SearchProfile;
-      setResults((current) => ({
-        ...(current ?? DEFAULT_STATE),
-        profile: payload,
-      }));
-    });
-
-    source.addEventListener('source', (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as SearchResult;
-      setResults((current) => {
-        const previous = current ?? DEFAULT_STATE;
-        if (previous.sources.some((sourceItem) => sourceItem.url === payload.url)) {
-          return previous;
-        }
-        return {
-          ...previous,
-          sources: [...previous.sources, payload],
-        };
+    try {
+      const response = await fetch('/search-api/api/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: trimmedQuery,
+          provider: searchProvider,
+          engines: searchProvider === 'searxng' ? selectedEngines : undefined,
+          apiKey: currentSearchApiKey || undefined,
+          synthesisProvider,
+          lmStudioEndpoint: synthesisProvider === 'lmstudio' ? settings.providers.lmStudioEndpoint : undefined,
+          lmStudioApiKey: synthesisProvider === 'lmstudio' ? settings.providers.lmStudioApiKey : undefined,
+          lmStudioModel: synthesisProvider === 'lmstudio' ? lmStudioModel : undefined,
+        }),
       });
-    });
 
-    source.addEventListener('citation', (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as Citation;
-      setResults((current) => {
-        const previous = current ?? DEFAULT_STATE;
-        if (previous.citations.some((citation) => citation.id === payload.id)) {
-          return previous;
-        }
-        return {
-          ...previous,
-          citations: [...previous.citations, payload],
-        };
-      });
-    });
-
-    source.addEventListener('agent', (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as SearchAgentTrace;
-      setResults((current) => {
-        const previous = current ?? DEFAULT_STATE;
-        return {
-          ...previous,
-          agentTrace: [...previous.agentTrace, payload],
-        };
-      });
-    });
-
-    source.addEventListener('token', (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as string;
-      setResults((current) => ({
-        ...(current ?? DEFAULT_STATE),
-        answer: `${current?.answer ?? ''}${payload}`,
-      }));
-    });
-
-    source.addEventListener('complete', (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as SearchResponse;
-      finalizeFromResponse(payload);
-      setQuery(trimmedQuery);
-      setIsSearching(false);
-      source.close();
-    });
-
-    source.addEventListener('error', (event) => {
-      try {
-        const payload = JSON.parse((event as MessageEvent).data) as { message?: string } | string;
-        setError(typeof payload === 'string' ? payload : payload.message ?? 'Search failed.');
-      } catch {
-        setError('Search failed.');
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Search failed.');
       }
-      setIsSearching(false);
-      source.close();
-    });
 
-    source.onerror = () => {
-      if (source.readyState === EventSource.CLOSED) {
-        return;
-      }
-      setError('Search stream disconnected. Check that the search API and SearXNG server are running.');
+      const data = payload as SearchResponse;
+      setResults({
+        answer: data.answer,
+        citations: data.citations,
+        sources: data.sources,
+        relatedQuestions: data.relatedQuestions,
+        agentTrace: data.agentTrace,
+        profile: data.profile,
+        provider: data.provider,
+        status: 'Complete',
+      });
+    } catch (searchError: any) {
+      setError(searchError.message || 'Search failed.');
+      setResults(null);
+    } finally {
       setIsSearching(false);
-      source.close();
-    };
+    }
   };
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.12),_transparent_30%),linear-gradient(180deg,#020617_0%,#020617_30%,#08111f_100%)] text-slate-100">
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 md:px-8">
         <section className="overflow-hidden rounded-[32px] border border-slate-800 bg-slate-950/85 shadow-2xl shadow-cyan-950/20">
-          <div className="grid gap-8 px-6 py-8 md:grid-cols-[1.3fr_0.7fr] md:px-8">
+          <div className="grid gap-8 px-6 py-8 md:grid-cols-[1.25fr_0.75fr] md:px-8">
             <div>
               <div className="mb-6 flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.3em] text-cyan-400">DuckBotSearch</p>
+                  <p className="text-xs uppercase tracking-[0.3em] text-cyan-400">DuckBotAISearch</p>
                   <h1 className="mt-2 text-3xl font-semibold text-white md:text-4xl">
-                    Perplexity-style search powered by SearXNG and swarm analysis
+                    Perplexity-style search with selectable backends and swarm synthesis
                   </h1>
                 </div>
                 <button
@@ -236,8 +188,8 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onModeChange }) => {
               </div>
 
               <p className="max-w-3xl text-sm leading-7 text-slate-300 md:text-base">
-                Google-style retrieval comes from your SearXNG instance, while the search swarm ranks,
-                cross-checks, cites, and synthesizes the answer in real time.
+                Choose a search backend from SearXNG, Brave Search, or Tavily. Then let the search swarm rank, cross-check,
+                cite, and optionally use LM Studio as the final synthesis provider.
               </p>
 
               <form
@@ -259,24 +211,101 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onModeChange }) => {
                   className="mt-3 w-full resize-none rounded-2xl border border-slate-800 bg-slate-950 px-4 py-4 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-600"
                 />
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {(availableEngines.length > 0 ? availableEngines : ['google', 'bing', 'duckduckgo', 'wikipedia']).map((engine) => {
-                    const selected = selectedEngines.includes(engine);
-                    return (
-                      <button
-                        key={engine}
-                        type="button"
-                        onClick={() => toggleEngine(engine)}
-                        className={`rounded-full border px-3 py-1.5 text-sm transition ${
-                          selected
-                            ? 'border-cyan-600 bg-cyan-500/10 text-cyan-300'
-                            : 'border-slate-700 text-slate-300 hover:border-slate-500'
-                        }`}
-                      >
-                        {engine}
-                      </button>
-                    );
-                  })}
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
+                    <label className="block text-xs uppercase tracking-[0.2em] text-slate-500">Search Backend</label>
+                    <select
+                      value={searchProvider}
+                      onChange={(event) => setSearchProvider(event.target.value as SearchProvider)}
+                      className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                    >
+                      <option value="searxng">SearXNG</option>
+                      <option value="brave">Brave Search</option>
+                      <option value="tavily">Tavily</option>
+                    </select>
+
+                    {searchProvider === 'searxng' ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {(availableEngines.length > 0 ? availableEngines : ['google', 'bing', 'duckduckgo', 'wikipedia']).map((engine) => {
+                          const selected = selectedEngines.includes(engine);
+                          return (
+                            <button
+                              key={engine}
+                              type="button"
+                              onClick={() => toggleEngine(engine)}
+                              className={`rounded-full border px-3 py-1.5 text-sm transition ${
+                                selected
+                                  ? 'border-cyan-600 bg-cyan-500/10 text-cyan-300'
+                                  : 'border-slate-700 text-slate-300 hover:border-slate-500'
+                              }`}
+                            >
+                              {engine}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="mt-3">
+                        <label className="text-xs text-slate-400">
+                          {searchProvider === 'brave' ? 'Brave Search API Key' : 'Tavily API Key'}
+                        </label>
+                        <input
+                          type="password"
+                          value={currentSearchApiKey}
+                          onChange={(event) => updateProviderSetting(searchProvider === 'brave' ? 'braveSearchApiKey' : 'tavilyApiKey', event.target.value)}
+                          className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                          placeholder="Enter API key"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
+                    <label className="block text-xs uppercase tracking-[0.2em] text-slate-500">AI Provider</label>
+                    <select
+                      value={synthesisProvider}
+                      onChange={(event) => setSynthesisProvider(event.target.value as 'heuristic' | 'lmstudio')}
+                      className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                    >
+                      <option value="heuristic">Built-in Swarm Heuristic</option>
+                      <option value="lmstudio">LM Studio</option>
+                    </select>
+
+                    {synthesisProvider === 'lmstudio' && (
+                      <div className="mt-3 space-y-3">
+                        <div>
+                          <label className="text-xs text-slate-400">LM Studio Endpoint</label>
+                          <input
+                            type="text"
+                            value={settings.providers.lmStudioEndpoint}
+                            onChange={(event) => updateProviderSetting('lmStudioEndpoint', event.target.value)}
+                            className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                            placeholder="http://localhost:1234/v1/chat/completions"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-400">LM Studio API Key</label>
+                          <input
+                            type="password"
+                            value={settings.providers.lmStudioApiKey || ''}
+                            onChange={(event) => updateProviderSetting('lmStudioApiKey', event.target.value)}
+                            className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                            placeholder="optional"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-400">LM Studio Model</label>
+                          <input
+                            type="text"
+                            value={lmStudioModel}
+                            onChange={(event) => setLmStudioModel(event.target.value)}
+                            className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                            placeholder="local-model"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
@@ -290,10 +319,13 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onModeChange }) => {
                             : 'bg-slate-800 text-slate-300'
                       }`}
                     >
-                      backend: {backendStatus}
+                      search api: {backendStatus}
                     </span>
                     <span className="rounded-full bg-slate-800 px-2.5 py-1">
-                      engines: {selectedEngines.join(', ')}
+                      backend: {searchProvider}
+                    </span>
+                    <span className="rounded-full bg-slate-800 px-2.5 py-1">
+                      ai: {synthesisProvider === 'lmstudio' ? 'LM Studio' : 'Built-in'}
                     </span>
                   </div>
 
@@ -309,23 +341,19 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onModeChange }) => {
             </div>
 
             <div className="rounded-[28px] border border-slate-800 bg-slate-900/70 p-6">
-              <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Search Modes</p>
+              <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Swarm Layout</p>
               <div className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
-                  <p className="font-semibold text-white">Query Analyst</p>
-                  <p>Selects the best SearXNG engines for the search intent.</p>
+                  <p className="font-semibold text-white">Search Providers</p>
+                  <p>SearXNG for metasearch, Brave Search for API search, and Tavily for research-oriented retrieval.</p>
                 </div>
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
-                  <p className="font-semibold text-white">Result Processor</p>
-                  <p>Ranks, deduplicates, and diversifies the raw search graph.</p>
+                  <p className="font-semibold text-white">Agent Swarm</p>
+                  <p>Query analyst, result processor, fact checker, citation formatter, and answer architect.</p>
                 </div>
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
-                  <p className="font-semibold text-white">Fact Checker</p>
-                  <p>Measures corroboration and flags weak freshness or source diversity.</p>
-                </div>
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
-                  <p className="font-semibold text-white">Answer Architect</p>
-                  <p>Builds a cited answer plus follow-up prompts from the ranked results.</p>
+                  <p className="font-semibold text-white">AI Provider</p>
+                  <p>Use the built-in synthesis path or hand the final synthesis to LM Studio with an endpoint, model, and optional key.</p>
                 </div>
               </div>
             </div>
@@ -340,8 +368,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onModeChange }) => {
 
         {!results && !error && (
           <section className="rounded-3xl border border-slate-800 bg-slate-950/75 p-6 text-sm leading-7 text-slate-300">
-            Try prompts like “latest AI agent framework releases”, “compare SearXNG vs Tavily”, or
-            “how to self-host SearXNG on Windows”.
+            Try prompts like "latest AI agent framework releases", "compare SearXNG vs Tavily", or "how to self-host SearXNG on Windows".
           </section>
         )}
 
@@ -350,7 +377,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onModeChange }) => {
             answer={results.answer}
             citations={results.citations}
             sources={results.sources}
-            status={results.status}
+            status={`${results.status} via ${results.provider}`}
             query={query}
             relatedQuestions={results.relatedQuestions}
             agentTrace={results.agentTrace}

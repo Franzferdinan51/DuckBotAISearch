@@ -3,7 +3,7 @@
  * Handles search requests from the frontend
  */
 
-import { SearchOrchestrator } from './searchOrchestrator';
+import { SearchExecutionRequest, SearchOrchestrator } from './searchOrchestrator';
 import { SearchResponse } from './SearchResult';
 import { searxngClient } from './searxngClient';
 
@@ -19,9 +19,9 @@ export class SearchService {
   /**
    * Perform a search query
    */
-  async search(query: string, engines?: string[]): Promise<SearchResponse> {
+  async search(query: string, request: SearchExecutionRequest = {}): Promise<SearchResponse> {
     try {
-      const response = await this.orchestrator.search(query, engines);
+      const response = await this.orchestrator.search(query, request);
 
       // Add to history
       this.addToHistory(response);
@@ -36,9 +36,9 @@ export class SearchService {
   /**
    * Stream search results
    */
-  async *streamSearch(query: string, engines?: string[]): AsyncGenerator<any> {
+  async *streamSearch(query: string, request: SearchExecutionRequest = {}): AsyncGenerator<any> {
     try {
-      yield* this.orchestrator.streamSearch(query, engines);
+      yield* this.orchestrator.streamSearch(query, request);
     } catch (error) {
       console.error('Stream search error:', error);
       yield { type: 'error', data: this.handleSearchError(error).message };
@@ -88,8 +88,11 @@ export class SearchService {
    * Handle search errors
    */
   private handleSearchError(error: any): Error {
+    if (error.message?.includes('requires an API key')) {
+      return new Error(error.message);
+    }
     if (error.message?.includes('fetch')) {
-      return new Error('Cannot connect to SearXNG. Please check your configuration.');
+      return new Error('Cannot connect to the selected search backend. Please check your configuration.');
     }
     if (error.message?.includes('timeout')) {
       return new Error('Search timed out. Please try a simpler query.');
